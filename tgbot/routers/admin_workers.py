@@ -4,7 +4,7 @@ import datetime as dt
 from aiogram import Router, F, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
-from tgbot.data.config import PATH_DATABASE
+from tgbot.data.config import PATH_DATABASE, get_admins
 from tgbot.utils.misc.bot_filters import IsAdmin
 
 router = Router()
@@ -15,9 +15,6 @@ PAGE_SIZE = 10
 
 
 # ====================== Вспомогательные ======================
-def _dicts(con):
-    con.row_factory = sqlite3.Row
-    return con.cursor()
 
 
 def _citizenship_display(w: dict) -> str:
@@ -44,8 +41,7 @@ def _get_recent_shifts(worker_id: int, limit: int = 5):
     """Последние N смен"""
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
-        cur = con.cursor()
-        rows = cur.execute(
+        rows = con.execute(
             """
             SELECT s.id AS shift_id, o.description, o.start_time, o.format, s.status
             FROM shifts s
@@ -83,32 +79,50 @@ def _format_shift_row(s: dict) -> str:
 
 
 # ====================== Список работников ======================
+
+
 @router.message(F.text == "👷 Рабочие")
 async def show_workers(message: types.Message):
-    """Показать список работников (инлайн-кнопки)"""
+    """Список работников (инлайн-кнопки), без админов."""
     page = 0
+    offset = page * PAGE_SIZE
+    admin_ids = set(get_admins())  # читаем из settings.ini
+
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
-        cur = con.cursor()
 
-        rows = cur.execute(
-            "SELECT * FROM workers ORDER BY id DESC LIMIT ? OFFSET ?",
-            (PAGE_SIZE, page * PAGE_SIZE),
+        where_sql = "WHERE 1=1"
+        params: list = []
+        if admin_ids:
+            placeholders = ",".join("?" * len(admin_ids))
+            where_sql += f" AND telegram_id NOT IN ({placeholders})"
+            params.extend(list(admin_ids))
+
+        rows = con.execute(
+            f"SELECT * FROM workers {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?",
+            (*params, PAGE_SIZE, offset),
         ).fetchall()
-        total = cur.execute("SELECT COUNT(*) FROM workers").fetchone()[0]
+
+        total = con.execute(
+            f"SELECT COUNT(*) FROM workers {where_sql}",
+            params,
+        ).fetchone()[0]
 
     if not rows:
-        await message.answer("❗️ В базе нет зарегистрированных работников.")
+        await message.answer(
+            "❗️ В базе нет зарегистрированных работников (кроме админов)."
+        )
         return
 
     kb_rows = []
-    for w in rows:
-        w = dict(w)
-        text = f"{w['name']} | {w['phone']} | {_citizenship_display(w)}"
+    for r in rows:
+        w = dict(r)
+        title = f"{w['name']} | {w['phone']} | {_citizenship_display(w)}"
         kb_rows.append(
             [
                 InlineKeyboardButton(
-                    text=text, callback_data=f"admin_worker_info:{w['id']}:{page}"
+                    text=title,
+                    callback_data=f"admin_worker_info:{w['id']}:{page}",
                 )
             ]
         )
@@ -130,24 +144,37 @@ async def show_workers(message: types.Message):
         kb_rows.append(nav)
 
     await message.answer(
-        "👷 <b>Список работников</b>:\nНажмите на пользователя, чтобы открыть карточку.",
+        "👷 <b>Список работников</b>\nНажмите на пользователя, чтобы открыть карточку.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows),
         parse_mode="HTML",
     )
 
 
 # ====================== Пагинация ======================
+
+
 @router.callback_query(F.data.startswith("admin_workers_page:"))
 async def paginate_workers(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
+    admin_ids = set(get_admins())
+
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
-        cur = con.cursor()
-        rows = cur.execute(
-            "SELECT * FROM workers ORDER BY id DESC LIMIT ? OFFSET ?",
-            (PAGE_SIZE, page * PAGE_SIZE),
+        where_sql = "WHERE 1=1"
+        params: list = []
+        if admin_ids:
+            placeholders = ",".join("?" * len(admin_ids))
+            where_sql += f" AND telegram_id NOT IN ({placeholders})"
+            params.extend(list(admin_ids))
+
+        rows = con.execute(
+            f"SELECT * FROM workers {where_sql} ORDER BY id DESC LIMIT ? OFFSET ?",
+            (*params, PAGE_SIZE, page * PAGE_SIZE),
         ).fetchall()
-        total = cur.execute("SELECT COUNT(*) FROM workers").fetchone()[0]
+
+        total = con.execute(
+            f"SELECT COUNT(*) FROM workers {where_sql}", params
+        ).fetchone()[0]
 
     if not rows:
         await callback.answer("Нет работников на этой странице.", show_alert=True)
@@ -160,7 +187,8 @@ async def paginate_workers(callback: CallbackQuery):
         kb_rows.append(
             [
                 InlineKeyboardButton(
-                    text=text, callback_data=f"admin_worker_info:{w['id']}:{page}"
+                    text=text,
+                    callback_data=f"admin_worker_info:{w['id']}:{page}",
                 )
             ]
         )
@@ -182,7 +210,7 @@ async def paginate_workers(callback: CallbackQuery):
         kb_rows.append(nav)
 
     await callback.message.edit_text(
-        "👷 <b>Список работников</b>:\nНажмите на пользователя, чтобы открыть карточку.",
+        "👷 <b>Список работников</b>\nНажмите на пользователя, чтобы открыть карточку.",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows),
         parse_mode="HTML",
     )
@@ -190,6 +218,8 @@ async def paginate_workers(callback: CallbackQuery):
 
 
 # ====================== Карточка работника ======================
+
+
 @router.callback_query(F.data.startswith("admin_worker_info:"))
 async def show_worker_card(callback: CallbackQuery):
     _, worker_id, page = callback.data.split(":")
@@ -205,6 +235,12 @@ async def show_worker_card(callback: CallbackQuery):
         w = dict(w)
         total_shifts = _count_shifts(con, worker_id)
 
+    created = w.get("created_at")
+    if created:
+        date_str = dt.datetime.fromtimestamp(int(created)).strftime("%d.%m.%Y %H:%M")
+    else:
+        date_str = "-"
+
     text = (
         f"👤 <b>{w['name']}</b> (ID: {w['id']})\n"
         f"📞 Телефон: <code>{w['phone']}</code>\n"
@@ -214,8 +250,7 @@ async def show_worker_card(callback: CallbackQuery):
         f"📊 Статус: {_status_display(w)}\n"
         f"🗓 Всего смен: {total_shifts}\n"
         f"👥 Telegram: @{w.get('telegram_login', '-')}\n"
-        f"📅 Дата регистрации: "
-        f"{dt.datetime.fromtimestamp(w.get('created_at', 0)).strftime('%d.%m.%Y %H:%M') if w.get('created_at') else '-'}"
+        f"📅 Дата регистрации: {date_str}"
     )
 
     is_blocked = w.get("status") == "blocked"
@@ -236,7 +271,14 @@ async def show_worker_card(callback: CallbackQuery):
             ],
             [
                 InlineKeyboardButton(
-                    text="⬅️ Назад к списку", callback_data=f"admin_workers_page:{page}"
+                    text="🗑 Удалить рабочего",
+                    callback_data=f"admin_worker_delete_confirm:{w['id']}:{page}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад к списку",
+                    callback_data=f"admin_workers_page:{page}",
                 )
             ],
         ]
@@ -246,7 +288,68 @@ async def show_worker_card(callback: CallbackQuery):
     await callback.answer()
 
 
+# ====================== Подтверждение удаления ======================
+
+
+@router.callback_query(F.data.startswith("admin_worker_delete_confirm:"))
+async def confirm_delete_worker(callback: CallbackQuery):
+    _, worker_id, page = callback.data.split(":")
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, удалить",
+                    callback_data=f"admin_worker_delete_yes:{worker_id}:{page}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Отмена",
+                    callback_data=f"admin_worker_info:{worker_id}:{page}",
+                )
+            ],
+        ]
+    )
+    await callback.message.edit_text(
+        f"Вы уверены, что хотите удалить работника ID {worker_id}? "
+        f"Все связанные смены и транзакции будут удалены.",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+# ====================== Удаление работника ======================
+
+
+@router.callback_query(F.data.startswith("admin_worker_delete_yes:"))
+async def delete_worker(callback: CallbackQuery):
+    _, worker_id, page = callback.data.split(":")
+    worker_id = int(worker_id)
+
+    with sqlite3.connect(PATH_DATABASE) as con:
+        cur = con.cursor()
+        cur.execute("DELETE FROM transactions WHERE worker_id=?", (worker_id,))
+        cur.execute("DELETE FROM shifts WHERE worker_id=?", (worker_id,))
+        cur.execute("DELETE FROM skipped_orders WHERE worker_id=?", (worker_id,))
+        cur.execute("DELETE FROM workers WHERE id=?", (worker_id,))
+        con.commit()
+
+    await callback.message.edit_text(f"🗑 Работник ID {worker_id} удалён.")
+    await callback.answer("Удалено.")
+    # Возвращаемся к списку работников
+    await paginate_workers(
+        types.CallbackQuery(
+            id=callback.id,
+            from_user=callback.from_user,
+            message=callback.message,
+            data=f"admin_workers_page:{page}",
+        )
+    )
+
+
 # ====================== История смен ======================
+
+
 @router.callback_query(F.data.startswith("admin_worker_history:"))
 async def show_worker_history(callback: CallbackQuery):
     _, worker_id, page = callback.data.split(":")
@@ -275,6 +378,8 @@ async def show_worker_history(callback: CallbackQuery):
 
 
 # ====================== Блокировка/Разблокировка ======================
+
+
 @router.callback_query(F.data.startswith("admin_worker_toggle:"))
 async def toggle_worker_status(callback: CallbackQuery):
     _, worker_id, page = callback.data.split(":")
@@ -300,4 +405,13 @@ async def toggle_worker_status(callback: CallbackQuery):
         else "🚫 Работник заблокирован."
     )
     await callback.answer(msg, show_alert=True)
-    await show_worker_card(callback)
+
+    # Обновляем карточку
+    await show_worker_card(
+        types.CallbackQuery(
+            id=callback.id,
+            from_user=callback.from_user,
+            message=callback.message,
+            data=f"admin_worker_info:{worker_id}:{page}",
+        )
+    )

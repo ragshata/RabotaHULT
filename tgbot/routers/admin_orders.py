@@ -11,6 +11,7 @@ from aiogram.types import (
 )
 
 from tgbot.data.config import PATH_DATABASE
+from tgbot.routers.admin_panel import admin_menu
 from tgbot.services.broadcast import broadcast_order
 from tgbot.utils.misc.bot_filters import IsAdmin
 
@@ -351,11 +352,67 @@ async def confirm_order(callback: types.CallbackQuery, state):
                     text="❌ Отменить", callback_data=f"admin_cancel_order:{order_id}"
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    text="🗑 Удалить", callback_data=f"admin_delete_order:{order_id}"
+                )
+            ],
         ]
     )
 
     await callback.message.edit_text(text, reply_markup=kb)
     await callback.answer("✅ Заказ сохранён")
+    await callback.message.answer("📋 Админ-меню:", reply_markup=admin_menu())
+
+
+# === Удаление заказа: шаг 1 — подтверждение ===
+@router.callback_query(F.data.startswith("admin_delete_order:"))
+async def admin_delete_order_confirm(callback: types.CallbackQuery):
+    order_id = int(callback.data.split(":")[1])
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, удалить",
+                    callback_data=f"admin_delete_order_yes:{order_id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Отмена", callback_data=f"admin_order:{order_id}"
+                )
+            ],
+        ]
+    )
+    await callback.message.edit_text(
+        f"Вы уверены, что хотите <b>удалить</b> заказ #{order_id}? "
+        f"Действие необратимо: будут удалены записи смен и транзакции по заказу.",
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+# === Удаление заказа: шаг 2 — выполнение ===
+@router.callback_query(F.data.startswith("admin_delete_order_yes:"))
+async def admin_delete_order_yes(callback: types.CallbackQuery):
+    order_id = int(callback.data.split(":")[1])
+
+    with sqlite3.connect(PATH_DATABASE) as con:
+        cur = con.cursor()
+        # Чистим связанные записи (если каскада нет)
+        cur.execute("DELETE FROM transactions   WHERE order_id=?", (order_id,))
+        cur.execute("DELETE FROM skipped_orders WHERE order_id=?", (order_id,))
+        cur.execute("DELETE FROM shifts         WHERE order_id=?", (order_id,))
+        # Сам заказ
+        cur.execute("DELETE FROM orders         WHERE id=?", (order_id,))
+        con.commit()
+
+    await callback.message.edit_text(f"🗑 Заказ #{order_id} удалён.")
+    await callback.answer("Готово.")
+    # Вернёмся в админ-меню
+    await callback.message.answer("📋 Админ-меню:", reply_markup=admin_menu())
 
 
 # === Запуск рассылки ===
@@ -364,3 +421,199 @@ async def admin_broadcast(callback: types.CallbackQuery, bot: Bot):
     order_id = int(callback.data.split(":")[1])
     await broadcast_order(bot, order_id)
     await callback.answer("✅ Рассылка запущена", show_alert=True)
+
+
+# === Редактирование заказа ===
+@router.callback_query(F.data == "edit_order")
+async def start_edit_order(callback: types.CallbackQuery, state):
+    """Показать меню выбора, что редактировать"""
+    data = await state.get_data()
+
+    if not data:
+        await callback.answer("⚠️ Нет данных для редактирования. Создайте заказ заново.")
+        return
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="👤 Клиент", callback_data="edit_field:client_name"
+                ),
+                InlineKeyboardButton(
+                    text="📞 Телефон", callback_data="edit_field:client_phone"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📝 Описание", callback_data="edit_field:description"
+                ),
+                InlineKeyboardButton(
+                    text="📍 Адрес", callback_data="edit_field:address"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🏙 Район", callback_data="edit_field:district"
+                ),
+                InlineKeyboardButton(
+                    text="⏰ Время", callback_data="edit_field:start_time"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="👥 Кол-во мест", callback_data="edit_field:places_total"
+                ),
+                InlineKeyboardButton(
+                    text="⚙️ Формат", callback_data="edit_field:format"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🌍 Гражданство", callback_data="edit_field:citizenship"
+                ),
+                InlineKeyboardButton(
+                    text="ℹ️ Особенности", callback_data="edit_field:features"
+                ),
+            ],
+            [
+                InlineKeyboardButton(text="✅ Готово", callback_data="confirm_order"),
+                InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_order"),
+            ],
+        ]
+    )
+
+    await callback.message.edit_text("✏️ Что вы хотите изменить?", reply_markup=kb)
+    await callback.answer()
+
+
+# === Переход к редактированию конкретного поля ===
+@router.callback_query(F.data.startswith("edit_field:"))
+async def choose_field_to_edit(callback: types.CallbackQuery, state):
+    field = callback.data.split(":")[1]
+    await state.update_data(edit_field=field)
+
+    # Определяем, что показывать в зависимости от поля
+    if field == "format":
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="⏱ Почасовая", callback_data="set_format:hour"
+                    ),
+                    InlineKeyboardButton(
+                        text="🕗 Смена (8ч)", callback_data="set_format:shift8"
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="📅 День (12ч)", callback_data="set_format:day12"
+                    )
+                ],
+            ]
+        )
+        await callback.message.edit_text("⚙️ Выберите новый формат:", reply_markup=kb)
+
+    elif field == "citizenship":
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🇷🇺 РФ", callback_data="set_citizenship:РФ"
+                    ),
+                    InlineKeyboardButton(
+                        text="🌍 Иностранец", callback_data="set_citizenship:Иностранец"
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🤝 Любое", callback_data="set_citizenship:Любое"
+                    )
+                ],
+            ]
+        )
+        await callback.message.edit_text(
+            "🌍 Выберите требуемое гражданство:", reply_markup=kb
+        )
+
+    elif field == "places_total":
+        await callback.message.edit_text(
+            "👥 Введите новое количество работников (1–20):"
+        )
+        await state.set_state(CreateOrder.edit_field)
+        return
+
+    else:
+        prompts = {
+            "client_name": "Введите новое имя клиента:",
+            "client_phone": "Введите новый телефон клиента:",
+            "description": "Введите новое описание работы:",
+            "address": "Введите новый адрес:",
+            "district": "Введите новый район:",
+            "start_time": "Введите новую дату и время (например: 15.09 09:00):",
+            "features": "Введите новые особенности (или 'нет'):",
+        }
+        await callback.message.edit_text(prompts.get(field, "Введите новое значение:"))
+        await state.set_state(CreateOrder.edit_field)
+
+    await callback.answer()
+
+
+# === Обработка кнопок для формат и гражданство ===
+@router.callback_query(F.data.startswith("set_format:"))
+async def set_format(callback: types.CallbackQuery, state):
+    fmt = callback.data.split(":")[1]
+    await state.update_data(format=fmt)
+    preview = format_order_card(await state.get_data(), order_id=0)
+    await callback.message.edit_text(
+        f"✅ Формат обновлён.\n\n{preview}", reply_markup=preview_keyboard()
+    )
+    await state.set_state(CreateOrder.confirm)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("set_citizenship:"))
+async def set_citizenship(callback: types.CallbackQuery, state):
+    val = callback.data.split(":")[1]
+    await state.update_data(citizenship=val)
+    preview = format_order_card(await state.get_data(), order_id=0)
+    await callback.message.edit_text(
+        f"✅ Гражданство обновлено.\n\n{preview}", reply_markup=preview_keyboard()
+    )
+    await state.set_state(CreateOrder.confirm)
+    await callback.answer()
+
+
+# === Сохранение отредактированного значения вручную ===
+@router.message(CreateOrder.edit_field)
+async def save_edited_field(message: types.Message, state):
+    data = await state.get_data()
+    field = data.get("edit_field")
+    new_value = message.text.strip()
+
+    # Проверяем и конвертируем
+    if field == "start_time":
+        try:
+            dt_obj = dt.datetime.strptime(new_value, "%d.%m %H:%M")
+            dt_obj = dt_obj.replace(year=dt.datetime.now().year)
+            new_value = int(dt_obj.timestamp())
+        except Exception:
+            await message.answer("⚠️ Формат неверный. Пример: 15.09 09:00")
+            return
+
+    if field == "places_total":
+        try:
+            n = int(new_value)
+            if not 1 <= n <= 20:
+                raise ValueError
+            new_value = n
+        except Exception:
+            await message.answer("⚠️ Введите число от 1 до 20.")
+            return
+
+    # Обновляем в памяти FSM
+    await state.update_data({field: new_value})
+    preview = format_order_card(await state.get_data(), order_id=0)
+    await message.answer(
+        f"✅ Поле обновлено.\n\n{preview}", reply_markup=preview_keyboard()
+    )
+    await state.set_state(CreateOrder.confirm)

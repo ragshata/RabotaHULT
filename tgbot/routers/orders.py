@@ -53,10 +53,14 @@ def has_time_conflict(worker_id: int, new_start: int, fmt: str) -> bool:
 
 
 def get_orders(user_id: int, page: int = 0):
+    """Получаем список заказов, исключая просроченные и полные по местам."""
+    now_ts = int(datetime.datetime.now().timestamp())
+
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
         cur = con.cursor()
 
+        # Пропущенные (на 48ч)
         cur.execute(
             """
             SELECT order_id FROM skipped_orders
@@ -66,12 +70,27 @@ def get_orders(user_id: int, page: int = 0):
         )
         skipped = {row["order_id"] for row in cur.fetchall()}
 
+        # Только актуальные заказы:
+        # - статус = 'created'
+        # - старт как минимум через 1 час
+        # - есть свободные места
         cur.execute(
-            "SELECT * FROM orders WHERE status = 'created' ORDER BY start_time ASC"
+            """
+            SELECT * FROM orders
+            WHERE status = 'created'
+              AND start_time > ?
+              AND places_taken < places_total
+            ORDER BY start_time ASC
+            """,
+            (now_ts + 3600,),
         )
+
         all_orders = [dict(row) for row in cur.fetchall()]
+
+        # Исключаем пропущенные
         filtered = [o for o in all_orders if o["id"] not in skipped]
 
+        # Пагинация
         start, end = page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE
         return filtered[start:end], len(filtered)
 
@@ -105,10 +124,14 @@ def orders_keyboard(orders: list[dict], page: int, total: int):
     return InlineKeyboardMarkup(inline_keyboard=kb)
 
 
-def order_button_text(o: dict):
+def order_button_text(o: dict) -> str:
     dt = datetime.datetime.fromtimestamp(o["start_time"])
     date_str = dt.strftime("%d.%m %H:%M")
-    return f"🗓 {date_str} | {o['description']} | 👥 {o['places_taken']}/{o['places_total']} | {o['district']}"
+    people = f"👥 {o['places_taken']}/{o['places_total']}"
+    desc = o.get("description", "")
+    district = o.get("district", "")
+    # формат: дата/время | люди | описание | район
+    return f"🗓 {date_str} | {people} | {desc} | {district}"
 
 
 def order_card_keyboard(order: dict, page: int):

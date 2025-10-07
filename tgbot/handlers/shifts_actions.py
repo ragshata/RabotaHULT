@@ -3,7 +3,8 @@ import sqlite3
 import datetime
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
-from tgbot.data.config import PATH_DATABASE
+from tgbot.data.config import PATH_DATABASE, get_admins
+from tgbot.services.broadcast import broadcast_order
 
 router = Router()
 
@@ -110,41 +111,101 @@ async def mark_done(callback: CallbackQuery):
 
 # ❌ Отказаться
 @router.callback_query(F.data.startswith("shift_cancel:"))
-async def cancel_shift(callback: CallbackQuery):
+async def cancel_shift(callback: CallbackQuery, bot: Bot):
     shift_id = int(callback.data.split(":")[1])
-    user_id = callback.from_user.id
     now = int(datetime.datetime.now().timestamp())
+    user_id = callback.from_user.id
 
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
         cur = con.cursor()
-        s = cur.execute("SELECT * FROM shifts WHERE id=?", (shift_id,)).fetchone()
-        o = cur.execute("SELECT * FROM orders WHERE id=?", (s["order_id"],)).fetchone()
 
-        accepted_at = o["start_time"] - 3 * 3600
-        diff_hours = (now - accepted_at) / 3600
+        # тянем смену + заказ
+        s_row = cur.execute("SELECT * FROM shifts WHERE id=?", (shift_id,)).fetchone()
+        if not s_row:
+            await callback.answer("Смена не найдена.", show_alert=True)
+            return
+        s = dict(s_row)
 
-        delta, msg = 0, ""
-        if diff_hours <= 2:
-            delta = -0.1
-            msg = "Вы отказались в течение 2 часов после записи. Рейтинг −0.1."
-        elif now < o["start_time"]:
-            delta = -0.5
-            msg = "Вы отказались поздно. Рейтинг −0.5. Возможны ограничения на записи 24ч."
-            update_rating(user_id, delta, cooldown_hours=24)
-        else:
-            delta = -1.0
-            msg = "Неявка. Рейтинг −1.0. Блокировка 7 дней."
-            update_rating(user_id, delta, block_days=7)
+        o_row = cur.execute(
+            "SELECT * FROM orders WHERE id=?", (s["order_id"],)
+        ).fetchone()
+        if not o_row:
+            await callback.answer("Заказ не найден.", show_alert=True)
+            return
+        o = dict(o_row)
 
-        if delta < 0:
-            update_rating(user_id, delta)
+        # нельзя после старта
+        if now >= o["start_time"]:
+            await callback.answer(
+                "❌ Нельзя отказаться после начала смены.", show_alert=True
+            )
+            return
 
+        # штраф: <=2ч после записи — -0.1, позже — -0.5
+        accepted_at = s.get("accepted_at") or 0
+        penalty = -0.1 if (now - accepted_at) <= 2 * 3600 else -0.5
+
+        # был ли заказ укомплектован до отказа?
+        was_full = o["places_taken"] >= o["places_total"]
+
+        # применяем
         cur.execute("UPDATE shifts SET status='cancelled' WHERE id=?", (shift_id,))
+        cur.execute(
+            "UPDATE workers SET rating = rating + ? WHERE id=?",
+            (penalty, s["worker_id"]),
+        )
+        cur.execute(
+            "UPDATE orders SET places_taken = CASE WHEN places_taken>0 THEN places_taken-1 ELSE 0 END WHERE id=?",
+            (o["id"],),
+        )
         con.commit()
 
+    # ответ исполнителю
+    msg = (
+        "❌ Вы отказались от смены. Рейтинг снижен на 0.1."
+        if penalty == -0.1
+        else "❌ Вы отказались от смены. Рейтинг снижен на 0.5. Возможны ограничения."
+    )
     await callback.answer(msg, show_alert=True)
     await callback.message.edit_text("Смена отменена.")
+
+    # === уведомления админам ===
+    admin_text = (
+        f"⚠️ <b>Отказ исполнителя</b>\n\n"
+        f"👷 <b>Worker ID:</b> {s['worker_id']}\n"
+    )
+
+    # достанем имя и телефон работника
+    with sqlite3.connect(PATH_DATABASE) as con:
+        con.row_factory = sqlite3.Row
+        worker = con.execute(
+            "SELECT name, phone FROM workers WHERE id=?", (s["worker_id"],)
+        ).fetchone()
+
+    if worker:
+        admin_text += f"👤 <b>Имя:</b> {worker['name']}\n📞 <b>Телефон:</b> {worker['phone']}\n\n"
+
+    admin_text += (
+        f"📦 <b>Заказ #{s['order_id']}</b>\n"
+        f"📝 <b>Описание:</b> {s.get('description','—')}\n"
+        f"📍 <b>Адрес:</b> {s.get('address','—')} ({s.get('district','—')})\n"
+        f"🕒 <b>Начало:</b> {datetime.datetime.fromtimestamp(s['start_time']).strftime('%d.%m %H:%M')}\n"
+        f"🔻 <b>Штраф:</b> {penalty}"
+    )
+
+    for admin_id in get_admins():
+        try:
+            await bot.send_message(admin_id, admin_text)
+        except Exception:
+            pass
+
+    # автодобор, если было укомплектовано
+    if was_full:
+        try:
+            await broadcast_order(bot, o["id"])
+        except Exception:
+            pass
 
 
 # ================= Автопометка "Неявка" =================

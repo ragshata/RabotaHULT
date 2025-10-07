@@ -2,7 +2,7 @@
 import sqlite3
 import datetime
 import urllib.parse
-from aiogram import Router, F
+from aiogram import Bot, Router, F
 from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
@@ -10,8 +10,9 @@ from aiogram.types import (
     Message,
 )
 
-from tgbot.data.config import PATH_DATABASE
+from tgbot.data.config import PATH_DATABASE, get_admins
 from tgbot.routers.orders import get_worker
+from tgbot.services.broadcast import broadcast_order
 
 router = Router()
 
@@ -328,52 +329,86 @@ async def shift_done(callback: CallbackQuery):
     )
     await show_shift_card(callback)
 
-
 # === ❌ Отказаться ===
 @router.callback_query(F.data.startswith("shift_cancel:"))
-async def shift_cancel(callback: CallbackQuery):
+async def shift_cancel(callback: CallbackQuery, bot: Bot):
     shift_id = int(callback.data.split(":")[1])
     now = int(datetime.datetime.now().timestamp())
 
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
         cur = con.cursor()
-        s = cur.execute(
-            "SELECT s.*, o.start_time, o.places_taken FROM shifts s "
-            "JOIN orders o ON s.order_id=o.id WHERE s.id=?",
+        s_row = cur.execute(
+            "SELECT s.*, o.id AS order_id, o.start_time, o.places_taken, o.places_total, o.address, o.district, o.description "
+            "FROM shifts s JOIN orders o ON s.order_id=o.id WHERE s.id=?",
             (shift_id,),
         ).fetchone()
 
-        if not s:
+        if not s_row:
             await callback.answer("Смена не найдена.", show_alert=True)
             return
 
-        s = dict(s)
+        s = dict(s_row)
+
         if now >= s["start_time"]:
-            await callback.answer(
-                "❌ Нельзя отказаться после начала смены.", show_alert=True
-            )
+            await callback.answer("❌ Нельзя отказаться после начала смены.", show_alert=True)
             return
 
-        penalty = -0.1
-        if s.get("accepted_at") and now - s["accepted_at"] > 2 * 3600:
-            penalty = -0.5
+        accepted_at = s.get("accepted_at") or 0
+        penalty = -0.1 if (now - accepted_at) <= 2 * 3600 else -0.5
+        was_full = s["places_taken"] >= s["places_total"]
 
-        cur.execute(
-            "UPDATE workers SET rating = rating + ? WHERE id=?",
-            (penalty, s["worker_id"]),
-        )
+        cur.execute("UPDATE workers SET rating = rating + ? WHERE id=?", (penalty, s["worker_id"]))
         cur.execute("UPDATE shifts SET status='cancelled' WHERE id=?", (shift_id,))
         cur.execute(
-            "UPDATE orders SET places_taken = places_taken - 1 WHERE id=? AND places_taken > 0",
+            "UPDATE orders SET places_taken = CASE WHEN places_taken>0 THEN places_taken-1 ELSE 0 END WHERE id=?",
             (s["order_id"],),
         )
         con.commit()
 
-    msg = "❌ Вы отказались от смены."
-    if penalty == -0.1:
-        msg += " Рейтинг снижен на 0.1."
-    else:
-        msg += " Рейтинг снижен на 0.5. Возможны ограничения."
+    msg = (
+        "❌ Вы отказались от смены. Рейтинг снижен на 0.1."
+        if penalty == -0.1
+        else "❌ Вы отказались от смены. Рейтинг снижен на 0.5. Возможны ограничения."
+    )
     await callback.answer(msg, show_alert=True)
+
+    # === уведомления админам ===
+    admin_text = (
+        f"⚠️ <b>Отказ исполнителя</b>\n\n"
+        f"👷 <b>Worker ID:</b> {s['worker_id']}\n"
+    )
+
+    # достанем имя и телефон работника
+    with sqlite3.connect(PATH_DATABASE) as con:
+        con.row_factory = sqlite3.Row
+        worker = con.execute(
+            "SELECT name, phone FROM workers WHERE id=?", (s["worker_id"],)
+        ).fetchone()
+
+    if worker:
+        admin_text += f"👤 <b>Имя:</b> {worker['name']}\n📞 <b>Телефон:</b> {worker['phone']}\n\n"
+
+    admin_text += (
+        f"📦 <b>Заказ #{s['order_id']}</b>\n"
+        f"📝 <b>Описание:</b> {s.get('description','—')}\n"
+        f"📍 <b>Адрес:</b> {s.get('address','—')} ({s.get('district','—')})\n"
+        f"🕒 <b>Начало:</b> {datetime.datetime.fromtimestamp(s['start_time']).strftime('%d.%m %H:%M')}\n"
+        f"🔻 <b>Штраф:</b> {penalty}"
+    )
+
+    for admin_id in get_admins():
+        try:
+            await bot.send_message(admin_id, admin_text)
+        except Exception:
+            pass
+
+    # автодобор, если было укомплектовано
+    if was_full:
+        try:
+            await broadcast_order(bot, s["order_id"])
+        except Exception:
+            pass
+
+    # вернём список смен
     await show_shifts(callback)
