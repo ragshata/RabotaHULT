@@ -176,6 +176,12 @@ async def show_order(message_or_cb, order_id: int | None = None):
                     callback_data=f"admin_cancel_order:{order_id}",
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    text="🗑 Удалить заказ",
+                    callback_data=f"admin_delete_order_confirm:{order_id}",
+                )
+            ],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_orders_back")],
         ]
     )
@@ -185,6 +191,57 @@ async def show_order(message_or_cb, order_id: int | None = None):
         await message_or_cb.answer()
     else:
         await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+# ====== Подтверждение удаления ======
+@router.callback_query(F.data.startswith("admin_delete_order_confirm:"))
+async def admin_delete_order_confirm(callback: CallbackQuery):
+    order_id = int(callback.data.split(":")[1])
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Да, удалить",
+                    callback_data=f"admin_delete_order:{order_id}",
+                ),
+                InlineKeyboardButton(
+                    text="⬅️ Отмена",
+                    callback_data=f"admin_order:{order_id}",
+                ),
+            ]
+        ]
+    )
+
+    await callback.message.edit_text(
+        f"⚠️ <b>Удалить заказ #{order_id}</b>?\n\n"
+        "Это действие необратимо: будут удалены все связанные смены и транзакции.",
+        reply_markup=kb,
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+# ====== Удаление заказа ======
+@router.callback_query(F.data.startswith("admin_delete_order:"))
+async def admin_delete_order(callback: CallbackQuery):
+    order_id = int(callback.data.split(":")[1])
+
+    with sqlite3.connect(PATH_DATABASE) as con:
+        cur = con.cursor()
+        # каскадное удаление
+        cur.execute("DELETE FROM transactions   WHERE order_id=?", (order_id,))
+        cur.execute("DELETE FROM shifts         WHERE order_id=?", (order_id,))
+        cur.execute("DELETE FROM skipped_orders WHERE order_id=?", (order_id,))
+        cur.execute("DELETE FROM orders         WHERE id=?", (order_id,))
+        con.commit()
+
+    # сообщение об успехе
+    await callback.answer("✅ Заказ удалён.", show_alert=True)
+    await callback.message.edit_text(f"🗑 Заказ #{order_id} успешно удалён.")
+
+    # 👇 Возвращаем пользователя к списку заказов
+    await show_orders(callback.message)
 
 
 # ====== Меню выбора поля ======
