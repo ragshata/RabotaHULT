@@ -6,11 +6,11 @@ import urllib
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from tgbot.data.config import PATH_DATABASE, get_admins
-
+from tgbot.services.tz import TZ
 
 def _order_card(order: dict) -> str:
     """Формируем красивую карточку заказа для рассылки"""
-    start_dt = dt.datetime.fromtimestamp(order["start_time"])
+    start_dt = dt.datetime.fromtimestamp(order["start_time"], TZ)
     start_str = start_dt.strftime("%d.%m %H:%M")
 
     fmt_map = {"hour": "Почасовая", "shift8": "Смена (8ч)", "day12": "День (12ч)"}
@@ -50,7 +50,7 @@ async def _send_to_worker(
             f"📋 Новый заказ #{order['id']}\n\n"
             f"📝 {order['description']}\n"
             f"📍 {order['address']} ({order['district']})\n"
-            f"⏰ {dt.datetime.fromtimestamp(order['start_time']).strftime('%d.%m %H:%M')}\n"
+            f"⏰ {dt.datetime.fromtimestamp(order['start_time'], TZ).strftime('%d.%m %H:%M')}\n"
             f"👥 {order['places_taken']}/{order['places_total']} мест\n"
             f"🌍 {order['citizenship_required']}\n"
             f"ℹ️ {order['features'] or '-'}"

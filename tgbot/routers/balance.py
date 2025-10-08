@@ -6,6 +6,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQu
 
 from tgbot.data.config import PATH_DATABASE
 from tgbot.routers.orders import get_worker
+from tgbot.services.tz import TZ
 
 router = Router()
 
@@ -58,7 +59,7 @@ async def show_balance(message: types.Message):
         text += "— История пуста."
     else:
         for r in rows:
-            date = dt.datetime.fromtimestamp(r["created_at"]).strftime("%d.%m")
+            date = dt.datetime.fromtimestamp(r["created_at"], TZ).strftime("%d.%m")
             status = "✅ выплачено" if r["status"] == "paid" else "⌛ не выплачено"
             text += f"— {date} | Заказ №{r['order_id']} | {r['amount']} ₽ | {status}\n"
 

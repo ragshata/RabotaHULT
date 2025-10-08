@@ -3,7 +3,7 @@ import sqlite3
 import datetime as dt
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
+from tgbot.services.tz import TZ
 from tgbot.data.config import PATH_DATABASE
 
 
@@ -24,11 +24,11 @@ def _ensure_notifications_table(con: sqlite3.Connection):
 
 
 def _now_ts() -> int:
-    return int(dt.datetime.now().timestamp())
+    return int(dt.datetime.now(TZ).timestamp())
 
 
 def _format_hhmm(ts: int) -> str:
-    return dt.datetime.fromtimestamp(ts).strftime("%H:%M")
+    return dt.datetime.fromtimestamp(ts, TZ).strftime("%H:%M")
 
 
 def _planned_end_ts(order_start: int, fmt: str) -> int:

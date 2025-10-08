@@ -5,6 +5,7 @@ from aiogram import Router, F, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 from tgbot.data.config import PATH_DATABASE, get_admins
+from tgbot.services.tz import TZ
 from tgbot.utils.misc.bot_filters import IsAdmin
 
 router = Router()
@@ -57,7 +58,7 @@ def _get_recent_shifts(worker_id: int, limit: int = 5):
 
 def _format_shift_row(s: dict) -> str:
     """Формат одной смены для истории"""
-    start = dt.datetime.fromtimestamp(s["start_time"]).strftime("%d.%m %H:%M")
+    start = dt.datetime.fromtimestamp(s["start_time"], TZ).strftime("%d.%m %H:%M")
     status_ru = {
         "accepted": "принял участие",
         "arrived": "прибыл",
@@ -237,7 +238,7 @@ async def show_worker_card(callback: CallbackQuery):
 
     created = w.get("created_at")
     if created:
-        date_str = dt.datetime.fromtimestamp(int(created)).strftime("%d.%m.%Y %H:%M")
+        date_str = dt.datetime.fromtimestamp(int(created), TZ).strftime("%d.%m.%Y %H:%M")
     else:
         date_str = "-"
 

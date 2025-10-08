@@ -9,7 +9,7 @@ from aiogram.types import (
     CallbackQuery,
     Message,
 )
-
+from tgbot.services.tz import TZ
 from tgbot.data.config import PATH_DATABASE, get_admins
 from tgbot.routers.orders import get_worker
 from tgbot.services.broadcast import broadcast_order
@@ -63,8 +63,8 @@ def get_shifts(user_id: int, status: str):
 
 
 def format_time_until(start_time: int) -> str:
-    dt = datetime.datetime.fromtimestamp(start_time)
-    now = datetime.datetime.now()
+    dt = datetime.datetime.fromtimestamp(start_time, TZ)
+    now = datetime.datetime.now(TZ)
     diff = dt - now
     if diff.total_seconds() > 0:
         h, m = divmod(int(diff.total_seconds()) // 60, 60)
@@ -74,7 +74,7 @@ def format_time_until(start_time: int) -> str:
 
 
 def shift_button_text(s: dict) -> str:
-    dt_str = datetime.datetime.fromtimestamp(s["start_time"]).strftime("%d.%m %H:%M")
+    dt_str = datetime.datetime.fromtimestamp(s["start_time"], TZ).strftime("%d.%m %H:%M")
     return f"{dt_str} • {s['description']} • {RU_STATUS.get(s['status'], s['status'])}"
 
 
@@ -99,7 +99,7 @@ def format_shift_card(s: dict) -> str:
 
 
 def shift_card_keyboard(s: dict):
-    now = int(datetime.datetime.now().timestamp())
+    now = int(datetime.datetime.now(TZ).timestamp())
     start = s["start_time"]
     buttons = []
 
@@ -271,7 +271,7 @@ async def show_shift_card(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("shift_arrive:"))
 async def shift_arrive(callback: CallbackQuery):
     shift_id = int(callback.data.split(":")[1])
-    now = int(datetime.datetime.now().timestamp())
+    now = int(datetime.datetime.now(TZ).timestamp())
 
     with sqlite3.connect(PATH_DATABASE) as con:
         cur = con.cursor()
@@ -289,7 +289,7 @@ async def shift_arrive(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("shift_done:"))
 async def shift_done(callback: CallbackQuery):
     shift_id = int(callback.data.split(":")[1])
-    now = int(datetime.datetime.now().timestamp())
+    now = int(datetime.datetime.now(TZ).timestamp())
 
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
@@ -329,11 +329,12 @@ async def shift_done(callback: CallbackQuery):
     )
     await show_shift_card(callback)
 
+
 # === ❌ Отказаться ===
 @router.callback_query(F.data.startswith("shift_cancel:"))
 async def shift_cancel(callback: CallbackQuery, bot: Bot):
     shift_id = int(callback.data.split(":")[1])
-    now = int(datetime.datetime.now().timestamp())
+    now = int(datetime.datetime.now(TZ).timestamp())
 
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
@@ -351,14 +352,19 @@ async def shift_cancel(callback: CallbackQuery, bot: Bot):
         s = dict(s_row)
 
         if now >= s["start_time"]:
-            await callback.answer("❌ Нельзя отказаться после начала смены.", show_alert=True)
+            await callback.answer(
+                "❌ Нельзя отказаться после начала смены.", show_alert=True
+            )
             return
 
         accepted_at = s.get("accepted_at") or 0
         penalty = -0.1 if (now - accepted_at) <= 2 * 3600 else -0.5
         was_full = s["places_taken"] >= s["places_total"]
 
-        cur.execute("UPDATE workers SET rating = rating + ? WHERE id=?", (penalty, s["worker_id"]))
+        cur.execute(
+            "UPDATE workers SET rating = rating + ? WHERE id=?",
+            (penalty, s["worker_id"]),
+        )
         cur.execute("UPDATE shifts SET status='cancelled' WHERE id=?", (shift_id,))
         cur.execute(
             "UPDATE orders SET places_taken = CASE WHEN places_taken>0 THEN places_taken-1 ELSE 0 END WHERE id=?",
@@ -375,8 +381,7 @@ async def shift_cancel(callback: CallbackQuery, bot: Bot):
 
     # === уведомления админам ===
     admin_text = (
-        f"⚠️ <b>Отказ исполнителя</b>\n\n"
-        f"👷 <b>Worker ID:</b> {s['worker_id']}\n"
+        f"⚠️ <b>Отказ исполнителя</b>\n\n" f"👷 <b>Worker ID:</b> {s['worker_id']}\n"
     )
 
     # достанем имя и телефон работника
@@ -387,13 +392,15 @@ async def shift_cancel(callback: CallbackQuery, bot: Bot):
         ).fetchone()
 
     if worker:
-        admin_text += f"👤 <b>Имя:</b> {worker['name']}\n📞 <b>Телефон:</b> {worker['phone']}\n\n"
+        admin_text += (
+            f"👤 <b>Имя:</b> {worker['name']}\n📞 <b>Телефон:</b> {worker['phone']}\n\n"
+        )
 
     admin_text += (
         f"📦 <b>Заказ #{s['order_id']}</b>\n"
         f"📝 <b>Описание:</b> {s.get('description','—')}\n"
         f"📍 <b>Адрес:</b> {s.get('address','—')} ({s.get('district','—')})\n"
-        f"🕒 <b>Начало:</b> {datetime.datetime.fromtimestamp(s['start_time']).strftime('%d.%m %H:%M')}\n"
+        f"🕒 <b>Начало:</b> {datetime.datetime.fromtimestamp(s['start_time'], TZ).strftime('%d.%m %H:%M')}\n"
         f"🔻 <b>Штраф:</b> {penalty}"
     )
 

@@ -5,13 +5,15 @@ from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
 from tgbot.data.config import PATH_DATABASE, get_admins
 from tgbot.services.broadcast import broadcast_order
+from tgbot.services.tz import TZ
+import datetime as dt
 
 router = Router()
 
 
 # ================= Вспомогательные =================
 def add_transaction(worker_id: int, order_id: int, amount: float):
-    now = int(datetime.datetime.now().timestamp())
+    now = int(datetime.datetime.now(TZ).timestamp())
     with sqlite3.connect(PATH_DATABASE) as con:
         con.execute(
             "INSERT INTO transactions (worker_id, order_id, amount, status, created_at) VALUES (?, ?, ?, 'unpaid', ?)",
@@ -23,7 +25,7 @@ def add_transaction(worker_id: int, order_id: int, amount: float):
 def update_rating(
     user_id: int, delta: float, block_days: int = 0, cooldown_hours: int = 0
 ):
-    now = int(datetime.datetime.now().timestamp())
+    now = int(datetime.datetime.now(TZ).timestamp())
     with sqlite3.connect(PATH_DATABASE) as con:
         cur = con.cursor()
         cur.execute(
@@ -48,7 +50,7 @@ def update_rating(
 @router.callback_query(F.data.startswith("shift_arrive:"))
 async def mark_arrive(callback: CallbackQuery):
     shift_id = int(callback.data.split(":")[1])
-    now = int(datetime.datetime.now().timestamp())
+    now = int(datetime.datetime.now(TZ).timestamp())
 
     with sqlite3.connect(PATH_DATABASE) as con:
         cur = con.cursor()
@@ -76,7 +78,7 @@ async def mark_arrive(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("shift_done:"))
 async def mark_done(callback: CallbackQuery):
     shift_id = int(callback.data.split(":")[1])
-    now = int(datetime.datetime.now().timestamp())
+    now = int(datetime.datetime.now(TZ).timestamp())
 
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
@@ -113,7 +115,7 @@ async def mark_done(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("shift_cancel:"))
 async def cancel_shift(callback: CallbackQuery, bot: Bot):
     shift_id = int(callback.data.split(":")[1])
-    now = int(datetime.datetime.now().timestamp())
+    now = int(datetime.datetime.now(TZ).timestamp())
     user_id = callback.from_user.id
 
     with sqlite3.connect(PATH_DATABASE) as con:
@@ -172,8 +174,7 @@ async def cancel_shift(callback: CallbackQuery, bot: Bot):
 
     # === уведомления админам ===
     admin_text = (
-        f"⚠️ <b>Отказ исполнителя</b>\n\n"
-        f"👷 <b>Worker ID:</b> {s['worker_id']}\n"
+        f"⚠️ <b>Отказ исполнителя</b>\n\n" f"👷 <b>Worker ID:</b> {s['worker_id']}\n"
     )
 
     # достанем имя и телефон работника
@@ -184,13 +185,15 @@ async def cancel_shift(callback: CallbackQuery, bot: Bot):
         ).fetchone()
 
     if worker:
-        admin_text += f"👤 <b>Имя:</b> {worker['name']}\n📞 <b>Телефон:</b> {worker['phone']}\n\n"
+        admin_text += (
+            f"👤 <b>Имя:</b> {worker['name']}\n📞 <b>Телефон:</b> {worker['phone']}\n\n"
+        )
 
     admin_text += (
         f"📦 <b>Заказ #{s['order_id']}</b>\n"
         f"📝 <b>Описание:</b> {s.get('description','—')}\n"
         f"📍 <b>Адрес:</b> {s.get('address','—')} ({s.get('district','—')})\n"
-        f"🕒 <b>Начало:</b> {datetime.datetime.fromtimestamp(s['start_time']).strftime('%d.%m %H:%M')}\n"
+        f"🕒 <b>Начало:</b> {datetime.datetime.fromtimestamp(s['start_time'], TZ).strftime('%d.%m %H:%M')}\n"
         f"🔻 <b>Штраф:</b> {penalty}"
     )
 
@@ -211,7 +214,7 @@ async def cancel_shift(callback: CallbackQuery, bot: Bot):
 # ================= Автопометка "Неявка" =================
 async def job_mark_no_shows_and_penalize(bot: Bot):
     """Вызывается из scheduler каждые 5 минут — помечает неявившихся через 15 минут после старта"""
-    now = int(datetime.datetime.now().timestamp())
+    now = int(datetime.datetime.now(TZ).timestamp())
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
         cur = con.cursor()

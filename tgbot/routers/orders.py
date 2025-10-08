@@ -5,6 +5,7 @@ import urllib.parse
 from aiogram import Router, F, types, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from tgbot.data.config import PATH_DATABASE
+from tgbot.services.tz import TZ
 
 router = Router()
 PAGE_SIZE = 5
@@ -54,7 +55,7 @@ def has_time_conflict(worker_id: int, new_start: int, fmt: str) -> bool:
 
 def get_orders(user_id: int, page: int = 0):
     """Получаем список заказов, исключая просроченные и полные по местам."""
-    now_ts = int(datetime.datetime.now().timestamp())
+    now_ts = int(datetime.datetime.now(TZ).timestamp())
 
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
@@ -125,7 +126,7 @@ def orders_keyboard(orders: list[dict], page: int, total: int):
 
 
 def order_button_text(o: dict) -> str:
-    dt = datetime.datetime.fromtimestamp(o["start_time"])
+    dt = datetime.datetime.fromtimestamp(o["start_time"], TZ)
     date_str = dt.strftime("%d.%m %H:%M")
     people = f"👥 {o['places_taken']}/{o['places_total']}"
     desc = o.get("description", "")
@@ -162,7 +163,7 @@ def order_card_keyboard(order: dict, page: int):
 
 
 def format_order_card(o: dict):
-    dt = datetime.datetime.fromtimestamp(o["start_time"])
+    dt = datetime.datetime.fromtimestamp(o["start_time"], TZ)
     start_str = dt.strftime("%d.%m %H:%M")
 
     if o["format"] == "hour":
@@ -353,7 +354,7 @@ async def take_order(callback: CallbackQuery, bot: Bot):
         blocked_until = worker.get("blocked_until")
         if blocked_until:
             try:
-                if int(blocked_until) > int(datetime.datetime.now().timestamp()):
+                if int(blocked_until) > int(datetime.datetime.now(TZ).timestamp()):
                     await callback.answer(
                         "⛔️ Ваш профиль временно ограничен. Обратитесь в поддержку.",
                         show_alert=True,

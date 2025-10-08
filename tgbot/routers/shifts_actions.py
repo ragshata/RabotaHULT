@@ -6,13 +6,14 @@ from aiogram.types import CallbackQuery
 
 from tgbot.data.config import PATH_DATABASE, get_admins
 from tgbot.services.broadcast import broadcast_order
+from tgbot.services.tz import TZ
 
 router = Router()
 
 
 # ===== Вспомогательные =====
 def _now_ts() -> int:
-    return int(dt.datetime.now().timestamp())
+    return int(dt.datetime.now(TZ).timestamp())
 
 
 async def _notify_admins(bot, text: str):
@@ -128,7 +129,7 @@ async def shift_done(callback: CallbackQuery, bot):
 @router.callback_query(F.data.startswith("shift_cancel:"))
 async def shift_cancel(callback: CallbackQuery, bot: Bot):
     shift_id = int(callback.data.split(":")[1])
-    now = int(dt.datetime.now().timestamp())
+    now = int(dt.datetime.now(TZ).timestamp())
 
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
@@ -173,8 +174,7 @@ async def shift_cancel(callback: CallbackQuery, bot: Bot):
 
     # === уведомления админам ===
     admin_text = (
-        f"⚠️ <b>Отказ исполнителя</b>\n\n"
-        f"👷 <b>Worker ID:</b> {s['worker_id']}\n"
+        f"⚠️ <b>Отказ исполнителя</b>\n\n" f"👷 <b>Worker ID:</b> {s['worker_id']}\n"
     )
 
     # достанем имя и телефон работника
@@ -185,13 +185,15 @@ async def shift_cancel(callback: CallbackQuery, bot: Bot):
         ).fetchone()
 
     if worker:
-        admin_text += f"👤 <b>Имя:</b> {worker['name']}\n📞 <b>Телефон:</b> {worker['phone']}\n\n"
+        admin_text += (
+            f"👤 <b>Имя:</b> {worker['name']}\n📞 <b>Телефон:</b> {worker['phone']}\n\n"
+        )
 
     admin_text += (
         f"📦 <b>Заказ #{s['order_id']}</b>\n"
         f"📝 <b>Описание:</b> {s.get('description','—')}\n"
         f"📍 <b>Адрес:</b> {s.get('address','—')} ({s.get('district','—')})\n"
-        f"🕒 <b>Начало:</b> {dt.datetime.fromtimestamp(s['start_time']).strftime('%d.%m %H:%M')}\n"
+        f"🕒 <b>Начало:</b> {dt.datetime.fromtimestamp(s['start_time'], TZ).strftime('%d.%m %H:%M')}\n"
         f"🔻 <b>Штраф:</b> {penalty}"
     )
 

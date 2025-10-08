@@ -13,6 +13,7 @@ from aiogram.types import (
 from tgbot.data.config import PATH_DATABASE
 from tgbot.routers.admin_panel import admin_menu
 from tgbot.services.broadcast import broadcast_order
+from tgbot.services.tz import TZ
 from tgbot.utils.misc.bot_filters import IsAdmin
 
 router = Router()
@@ -84,7 +85,7 @@ def format_order_card(data: dict, order_id: int) -> str:
         f"👤 Клиент: {data['client_name']} ({data['client_phone']})\n"
         f"📝 Описание: {data['description']}\n"
         f"📍 Адрес: {data['address']} ({data['district']})\n"
-        f"⏰ Старт: {dt.datetime.fromtimestamp(data['start_time']).strftime('%d.%m %H:%M')}\n"
+        f"⏰ Старт: {dt.datetime.fromtimestamp(data['start_time'], TZ).strftime('%d.%m %H:%M')}\n"
         f"⚙️ Формат: {data['format']}\n"
         f"👥 Места: {data['places_total']}\n"
         f"🌍 Гражданство: {data['citizenship']}\n"
@@ -226,7 +227,7 @@ async def step_district(callback: types.CallbackQuery, state):
 async def step_start_time(message: types.Message, state):
     try:
         dt_obj = dt.datetime.strptime(message.text.strip(), "%d.%m %H:%M")
-        dt_obj = dt_obj.replace(year=dt.datetime.now().year)
+        dt_obj = dt_obj.replace(year=dt.datetime.now(TZ).year)
         start_ts = int(dt_obj.timestamp())
     except Exception:
         await message.answer("⚠️ Формат неверный. Введите как: 15.09 09:00")
@@ -594,7 +595,7 @@ async def save_edited_field(message: types.Message, state):
     if field == "start_time":
         try:
             dt_obj = dt.datetime.strptime(new_value, "%d.%m %H:%M")
-            dt_obj = dt_obj.replace(year=dt.datetime.now().year)
+            dt_obj = dt_obj.replace(year=dt.datetime.now(TZ).year)
             new_value = int(dt_obj.timestamp())
         except Exception:
             await message.answer("⚠️ Формат неверный. Пример: 15.09 09:00")

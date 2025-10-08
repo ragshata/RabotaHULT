@@ -32,7 +32,7 @@ def get_unpaid_summary():
 
 def mark_paid(worker_id: int):
     """Отметить все транзакции работника как выплаченные"""
-    now = int(dt.datetime.now().timestamp())
+    now = int(dt.datetime.now(TZ).timestamp())
     with sqlite3.connect(PATH_DATABASE) as con:
         cur = con.cursor()
         cur.execute(

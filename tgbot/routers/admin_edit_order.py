@@ -81,7 +81,7 @@ async def save_edit_value(message: types.Message, state, bot):
     if field == "start_time":
         try:
             dt_obj = dt.datetime.strptime(value, "%d.%m %H:%M")
-            dt_obj = dt_obj.replace(year=dt.datetime.now().year)
+            dt_obj = dt_obj.replace(year=dt.datetime.now(TZ).year)
             value = int(dt_obj.timestamp())
         except Exception:
             await message.answer("⚠️ Неверный формат. Введите: 15.09 09:00")

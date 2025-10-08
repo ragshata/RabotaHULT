@@ -11,6 +11,7 @@ from aiogram.types import (
 )
 
 from tgbot.data.config import PATH_DATABASE, get_admins
+from tgbot.services.tz import TZ
 from tgbot.utils.misc.bot_filters import IsAdmin
 from aiogram.fsm.state import StatesGroup, State
 from tgbot.utils.misc.bot_models import FSM
@@ -22,7 +23,7 @@ router.callback_query.filter(IsAdmin())
 
 # ====== Вспомогательные ======
 def fmt_order_row(o: dict) -> str:
-    start = dt.datetime.fromtimestamp(o["start_time"]).strftime("%d.%m %H:%M")
+    start = dt.datetime.fromtimestamp(o["start_time"], TZ).strftime("%d.%m %H:%M")
     return (
         f"#{o['id']} | {start} | {o['client_name']} | {o['address']} ({o['district']}) | "
         f"{o['format']} | {o['places_taken']}/{o['places_total']} | {o['status']}"
@@ -64,7 +65,7 @@ async def show_orders(message: types.Message):
     kb = []
     for o in rows:
         o = dict(o)
-        start = dt.datetime.fromtimestamp(o["start_time"]).strftime("%d.%m %H:%M")
+        start = dt.datetime.fromtimestamp(o["start_time"], TZ).strftime("%d.%m %H:%M")
         text = f"#{o['id']} | {start} | {o['client_name']}"
         kb.append(
             [InlineKeyboardButton(text=text, callback_data=f"admin_order:{o['id']}")]
@@ -113,7 +114,7 @@ async def show_order(message_or_cb, order_id: int | None = None):
         return
 
     o = dict(o)
-    start = dt.datetime.fromtimestamp(o["start_time"]).strftime("%d.%m %H:%M")
+    start = dt.datetime.fromtimestamp(o["start_time"], TZ).strftime("%d.%m %H:%M")
 
     format_map = {
         "hour": "⏱️ Почасовая",
@@ -370,7 +371,7 @@ async def admin_save_text_edit(message, state: FSM):
         if field == "start_time":
             try:
                 dt_obj = dt.datetime.strptime(value, "%d.%m %H:%M")
-                dt_obj = dt_obj.replace(year=dt.datetime.now().year)
+                dt_obj = dt_obj.replace(year=dt.datetime.now(TZ).year)
                 value = int(dt_obj.timestamp())
                 cur.execute(
                     "UPDATE orders SET start_time=? WHERE id=?", (value, order_id)
