@@ -13,6 +13,7 @@ from tgbot.services.tz import TZ
 from tgbot.data.config import PATH_DATABASE, get_admins
 from tgbot.routers.orders import get_worker
 from tgbot.services.broadcast import broadcast_order
+from tgbot.utils.const_functions import format_display
 
 router = Router()
 
@@ -91,7 +92,7 @@ def format_shift_card(s: dict) -> str:
         f"📋 {s['description']}\n"
         f"📍 Адрес: {s['address']} ({s['district']})\n"
         f"⏰ {start_str}\n"
-        f"⚙️ Формат: {s['format']}\n"
+        f"⚙️ Формат: {format_display(s['format'])}\n"
         f"💰 Ставка: {rate}\n"
         f"📊 Статус: {RU_STATUS.get(s['status'], s['status'])}\n"
         f"ℹ️ Особенности: {s.get('features','-')}"

@@ -6,6 +6,7 @@ from aiogram import Router, F, types, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from tgbot.data.config import PATH_DATABASE
 from tgbot.services.tz import TZ
+from tgbot.utils.const_functions import format_display
 
 router = Router()
 PAGE_SIZE = 5
@@ -177,7 +178,7 @@ def format_order_card(o: dict):
         f"📋 <b>{o['description']}</b>\n\n"
         f"📍 Адрес: {o['address']} ({o['district']})\n"
         f"⏰ Старт: {start_str}\n"
-        f"⚙️ Формат: {o['format']}\n"
+        f"⚙️ Формат:{format_display(o['format'])}\n"
         f"👥 Места: {o['places_taken']}/{o['places_total']}\n"
         f"🌍 Гражданство: {o['citizenship_required']}\n"
         f"{rate}\n"

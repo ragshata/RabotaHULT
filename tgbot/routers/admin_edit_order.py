@@ -6,6 +6,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQu
 from aiogram.fsm.state import StatesGroup, State
 
 from tgbot.data.config import PATH_DATABASE
+from tgbot.services.tz import TZ
 from tgbot.utils.misc.bot_filters import IsAdmin
 
 router = Router()

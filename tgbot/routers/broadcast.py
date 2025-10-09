@@ -3,6 +3,7 @@ import sqlite3
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from tgbot.data.config import PATH_DATABASE
+from tgbot.utils.const_functions import format_display
 
 
 def format_order_card(o: dict) -> str:
@@ -11,7 +12,7 @@ def format_order_card(o: dict) -> str:
         f"{o['description']}\n"
         f"Адрес: {o['address']} ({o['district']})\n"
         f"Старт: {o['start_time']:%d.%m %H:%M}\n"
-        f"Формат: {o['format']}\n"
+        f"Формат: {format_display(o['format'])}\n"
         f"Места: {o['places_taken']}/{o['places_total']}\n"
         f"Гражданство: {o['citizenship_required']}\n"
         f"Особенности: {o['features'] or '-'}"

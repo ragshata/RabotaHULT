@@ -32,3 +32,13 @@ def clear_html(get_text: str) -> str:
         get_text = ""
 
     return get_text
+
+
+def format_display(fmt: str) -> str:
+    """Перевод формата работы в человекопонятный вид"""
+    mapping = {
+        "hour": "⏱ Почасовая работа",
+        "shift8": "🕗 Смена (8 часов)",
+        "day12": "📅 Смена (12 часов)",
+    }
+    return mapping.get(fmt, fmt)

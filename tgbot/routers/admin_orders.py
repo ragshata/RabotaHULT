@@ -14,6 +14,7 @@ from tgbot.data.config import PATH_DATABASE
 from tgbot.routers.admin_panel import admin_menu
 from tgbot.services.broadcast import broadcast_order
 from tgbot.services.tz import TZ
+from tgbot.utils.const_functions import format_display
 from tgbot.utils.misc.bot_filters import IsAdmin
 
 router = Router()
@@ -86,7 +87,7 @@ def format_order_card(data: dict, order_id: int) -> str:
         f"📝 Описание: {data['description']}\n"
         f"📍 Адрес: {data['address']} ({data['district']})\n"
         f"⏰ Старт: {dt.datetime.fromtimestamp(data['start_time'], TZ).strftime('%d.%m %H:%M')}\n"
-        f"⚙️ Формат: {data['format']}\n"
+        f"⚙️ <b>Формат:</b> {format_display(['format'])}\n"
         f"👥 Места: {data['places_total']}\n"
         f"🌍 Гражданство: {data['citizenship']}\n"
         f"ℹ️ Особенности: {data['features']}"
@@ -111,7 +112,24 @@ def preview_keyboard(order_id: int = 0):
 @router.message(F.text == "➕ Создать заказ")
 async def start_create_order(message: types.Message, state):
     await state.set_state(CreateOrder.client_name)
-    await message.answer("👤 Введите имя клиента:")
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отменить создание", callback_data="create_order_cancel")]
+        ]
+    )
+    await message.answer("👤 Введите имя клиента:", reply_markup=kb)
+
+
+# Кнопка «Отменить создание» (работает на любом шаге мастера)
+@router.callback_query(F.data == "create_order_cancel")
+async def create_order_cancel(callback: types.CallbackQuery, state):
+    await state.clear()
+    try:
+        await callback.message.edit_text("❌ Создание заказа отменено.")
+    except Exception:
+        # если сообщение нельзя отредактировать (например, уже отвечали) — просто отправим новое
+        await callback.message.answer("❌ Создание заказа отменено.")
+    await callback.answer()
 
 
 @router.message(CreateOrder.client_name)

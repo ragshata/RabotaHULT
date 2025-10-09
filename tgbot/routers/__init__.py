@@ -5,6 +5,7 @@ from aiogram import Dispatcher, F
 from tgbot.routers import (
     admin_balance,
     admin_cancel,
+    admin_mail,
     admin_orders,
     admin_workers,
     onboarding,
@@ -13,6 +14,7 @@ from tgbot.routers import (
     balance,
     profile,
     shifts_actions,
+    admin_mail,
     help,
 )
 from tgbot.routers import admin_panel  # если нужен отдельный модуль админки
@@ -35,6 +37,7 @@ def register_all_routers(dp: Dispatcher):
     dp.include_router(admin_balance.router)  # Выплаты админа
     dp.include_router(profile.router)  # Профиль юзера
     dp.include_router(admin_workers.router)  # Список юезров
+    dp.include_router(admin_mail.router)  # Расслыка
     dp.include_router(help.router)  # Помощь
 
     # === Админский роутер (если нужен) ===

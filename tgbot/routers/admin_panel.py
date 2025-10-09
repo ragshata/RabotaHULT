@@ -49,32 +49,105 @@ async def open_admin_order(callback: CallbackQuery):
     await show_order(callback, order_id)
 
 
-# ====== Список заказов ======
+# === Меню вкладок заказов ===
 @router.message(F.text == "📦 Заказы")
-async def show_orders(message: types.Message):
+async def admin_orders_tabs(message: types.Message):
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📌 Активные", callback_data="admin_orders_tab:active"
+                ),
+                InlineKeyboardButton(
+                    text="✅ Завершённые", callback_data="admin_orders_tab:done"
+                ),
+                InlineKeyboardButton(
+                    text="❌ Отменённые", callback_data="admin_orders_tab:cancelled"
+                ),
+            ]
+        ]
+    )
+    await message.answer("📦 Выберите категорию заказов:", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("admin_orders_tab:"))
+async def show_admin_orders_tab(callback: CallbackQuery):
+    tab = callback.data.split(":")[1]
+    now = dt.datetime.now(TZ).timestamp()
+
     with sqlite3.connect(PATH_DATABASE) as con:
         con.row_factory = sqlite3.Row
-        rows = con.execute(
-            "SELECT * FROM orders ORDER BY start_time DESC LIMIT 10"
-        ).fetchall()
+        cur = con.cursor()
+
+        # автообновление статусов
+        # 1️⃣ если до старта < 3ч и мест нет → "started" или "cancelled"
+        orders = cur.execute("SELECT * FROM orders").fetchall()
+        for o in orders:
+            if o["status"] in ("done", "cancelled"):
+                continue
+            start = o["start_time"]
+            if start - now <= 3 * 3600:
+                if o["places_taken"] == 0:
+                    cur.execute(
+                        "UPDATE orders SET status='cancelled' WHERE id=?", (o["id"],)
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE orders SET status='started' WHERE id=?", (o["id"],)
+                    )
+        con.commit()
+
+        # фильтрация вкладки
+        if tab == "active":
+            rows = cur.execute(
+                "SELECT * FROM orders WHERE status IN ('created','started') ORDER BY start_time DESC LIMIT 20"
+            ).fetchall()
+        elif tab == "done":
+            rows = cur.execute(
+                "SELECT * FROM orders WHERE status='done' ORDER BY start_time DESC LIMIT 20"
+            ).fetchall()
+        else:
+            rows = cur.execute(
+                "SELECT * FROM orders WHERE status='cancelled' ORDER BY start_time DESC LIMIT 20"
+            ).fetchall()
 
     if not rows:
-        await message.answer("❗️ Заказы не найдены.")
+        await callback.message.edit_text(
+            f"❗️ Вкладка пуста ({tab}).",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="⬅️ Назад", callback_data="admin_orders_back"
+                        )
+                    ]
+                ]
+            ),
+        )
         return
 
     kb = []
     for o in rows:
         o = dict(o)
         start = dt.datetime.fromtimestamp(o["start_time"], TZ).strftime("%d.%m %H:%M")
-        text = f"#{o['id']} | {start} | {o['client_name']}"
+        text = f"#{o['id']} | {start} | {o['places_taken']}/{o['places_total']} | {o['client_name']}"
         kb.append(
             [InlineKeyboardButton(text=text, callback_data=f"admin_order:{o['id']}")]
         )
 
-    await message.answer(
-        "📦 Последние заказы:\nВыберите нужный для просмотра 👇",
+    kb.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_orders_back")])
+
+    title_map = {
+        "active": "📌 Активные заказы",
+        "done": "✅ Завершённые заказы",
+        "cancelled": "❌ Отменённые заказы",
+    }
+
+    await callback.message.edit_text(
+        title_map.get(tab, "📦 Заказы"),
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb),
     )
+    await callback.answer()
 
 
 # === FSM для редактирования текстовых полей ===
@@ -187,11 +260,43 @@ async def show_order(message_or_cb, order_id: int | None = None):
         ]
     )
 
+    # Добавляем кнопку "Завершить заказ", если он ещё не завершён/не отменён
+    if o["status"] in ("created", "started"):
+        kb.inline_keyboard.insert(
+            -1,  # вставляем перед последней строкой с "⬅️ Назад"
+            [
+                InlineKeyboardButton(
+                    text="✅ Завершить заказ",
+                    callback_data=f"admin_mark_done:{order_id}",
+                )
+            ],
+        )
+
     if isinstance(message_or_cb, types.CallbackQuery):
         await message.edit_text(text, reply_markup=kb, parse_mode="HTML")
         await message_or_cb.answer()
     else:
         await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("admin_mark_done:"))
+async def admin_mark_done(callback: CallbackQuery):
+    order_id = int(callback.data.split(":")[1])
+
+    with sqlite3.connect(PATH_DATABASE) as con:
+        cur = con.cursor()
+        # помечаем заказ как завершённый
+        cur.execute("UPDATE orders SET status='done' WHERE id=?", (order_id,))
+        # помечаем все незакрытые смены как done (кроме отменённых)
+        cur.execute(
+            "UPDATE shifts SET status='done' WHERE order_id=? AND status!='cancelled'",
+            (order_id,),
+        )
+        con.commit()
+
+    await callback.answer("✅ Заказ отмечен завершённым.", show_alert=True)
+    # Перерисуем карточку уже с обновлённым статусом
+    await show_order(callback, order_id)
 
 
 # ====== Подтверждение удаления ======
@@ -242,7 +347,7 @@ async def admin_delete_order(callback: CallbackQuery):
     await callback.message.edit_text(f"🗑 Заказ #{order_id} успешно удалён.")
 
     # 👇 Возвращаем пользователя к списку заказов
-    await show_orders(callback.message)
+    await admin_orders_tabs(callback.message)
 
 
 # ====== Меню выбора поля ======
@@ -417,7 +522,7 @@ async def admin_set_value(callback: CallbackQuery):
 # ====== Назад к списку ======
 @router.callback_query(F.data == "admin_orders_back")
 async def back_to_orders(callback: CallbackQuery):
-    await show_orders(callback.message)
+    await admin_orders_tabs(callback.message)
 
 
 # ====== 3. Отмена заказа ======
@@ -653,10 +758,14 @@ def admin_menu() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="👷 Рабочие"),
                 KeyboardButton(text="💰 Выплаты"),
             ],
+            [
+                KeyboardButton(text="📣 Рассылка"), 
+            ],
         ],
         resize_keyboard=True,
         input_field_placeholder="Выберите действие…",
     )
+
 
 
 @router.message(F.text == "/admin")

@@ -8,23 +8,39 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from tgbot.data.config import PATH_DATABASE, get_admins
 from tgbot.services.tz import TZ
 
+
 def _order_card(order: dict) -> str:
-    """Формируем красивую карточку заказа для рассылки"""
+    """Формируем красивую карточку заказа для рассылки."""
     start_dt = dt.datetime.fromtimestamp(order["start_time"], TZ)
     start_str = start_dt.strftime("%d.%m %H:%M")
 
-    fmt_map = {"hour": "Почасовая", "shift8": "Смена (8ч)", "day12": "День (12ч)"}
-    fmt = fmt_map.get(order["format"], order["format"])
+    fmt_map = {
+        "hour": "⏱ Почасовая",
+        "shift8": "🕗 Смена (8 часов)",
+        "day12": "📅 Смена (12 часов)",
+    }
+    citizenship_map = {
+        "РФ": "🇷🇺 Граждане РФ",
+        "Иностранец": "🌍 Только иностранцы",
+        "Любое": "🤝 Любое гражданство",
+    }
+
+    fmt = fmt_map.get(order.get("format"), "—")
+    citizenship = citizenship_map.get(
+        order.get("citizenship_required"), order.get("citizenship_required", "—")
+    )
+    features = order.get("features") or "—"
+    district = order.get("district") or "—"
 
     return (
-        f"📢 Новый заказ!\n\n"
-        f"📝 {order['description']}\n"
-        f"📍 Адрес: {order['address']} ({order['district']})\n"
+        "📢 Новый заказ!\n\n"
+        f"📝 {order.get('description', 'Без описания')}\n"
+        f"📍 Адрес: {order.get('address', '—')} ({district})\n"
         f"⏰ Старт: {start_str}\n"
+        f"👥 Места: {order.get('places_taken', 0)}/{order.get('places_total', 0)}\n"
         f"⚙️ Формат: {fmt}\n"
-        f"👥 Места: {order['places_taken']}/{order['places_total']}\n"
-        f"🌍 Гражданство: {order['citizenship_required']}\n"
-        f"ℹ️ Особенности: {order['features'] or '-'}"
+        f"🌍 Гражданство: {citizenship}\n"
+        f"ℹ️ Особенности: {features}"
     )
 
 
@@ -41,7 +57,6 @@ async def _send_to_worker(
         return False, str(e)
 
 
-
 async def _send_to_worker(
     bot: Bot, worker: dict, order: dict, kb: InlineKeyboardMarkup
 ):
@@ -52,8 +67,8 @@ async def _send_to_worker(
             f"📍 {order['address']} ({order['district']})\n"
             f"⏰ {dt.datetime.fromtimestamp(order['start_time'], TZ).strftime('%d.%m %H:%M')}\n"
             f"👥 {order['places_taken']}/{order['places_total']} мест\n"
-            f"🌍 {order['citizenship_required']}\n"
-            f"ℹ️ {order['features'] or '-'}"
+            f"🌍 Нужно Гражданство: {order['citizenship_required']}\n"
+            f"ℹ️ Особености: {order['features'] or '-'}"
         )
         await bot.send_message(worker["telegram_id"], text, reply_markup=kb)
         return True, None

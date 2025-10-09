@@ -24,13 +24,19 @@ def help_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+
+def support_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="💬 Написать в поддержку",
+            url="https://t.me/Roberto17490"
+        )
+    ]])
+
 @router.message(F.text == "❓ Помощь")
 async def help_menu(message: types.Message):
     text = (
         "❓ <b>Помощь</b>\n\n"
-        "Здесь собраны основные документы сервиса:\n"
-        "• Правила использования\n"
-        "• Политика конфиденциальности\n\n"
-        "Нажмите кнопки ниже, чтобы открыть документы."
+        "Если остались вопросы — напишите нам в поддержку."
     )
-    await message.answer(text, reply_markup=help_keyboard(), parse_mode="HTML")
+    await message.answer(text, reply_markup=support_keyboard(), parse_mode="HTML")
