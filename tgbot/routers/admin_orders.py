@@ -227,7 +227,7 @@ async def step_district(callback: types.CallbackQuery, state):
 async def step_start_time(message: types.Message, state):
     try:
         dt_obj = dt.datetime.strptime(message.text.strip(), "%d.%m %H:%M")
-        dt_obj = dt_obj.replace(year=dt.datetime.now(TZ).year)
+        dt_obj = dt_obj.replace(year=dt.datetime.now().year)
         start_ts = int(dt_obj.timestamp())
     except Exception:
         await message.answer("⚠️ Формат неверный. Введите как: 15.09 09:00")
