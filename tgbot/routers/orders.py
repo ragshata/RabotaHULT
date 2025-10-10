@@ -314,21 +314,18 @@ async def take_order(callback: CallbackQuery, bot: Bot):
             )
             return
 
-        # гражданство
-        if order["citizenship_required"] == "РФ" and worker.get("citizenship") != "РФ":
+        # === Проверка гражданства ===
+        worker_cit = worker.get("citizenship")
+        order_cit = order.get("citizenship_required")
+
+        # Иностранец может брать только "Иностранец" и "Любое"
+        if worker_cit == "Иностранец" and order_cit not in ("Иностранец", "Любое"):
             await callback.answer(
-                "❌ Для этого заказа требуются граждане РФ. Выберите другой заказ.",
-                show_alert=True,
+                "❌ Этот заказ доступен только гражданам РФ.", show_alert=True
             )
             return
-        if (
-            order["citizenship_required"] == "Иностранец"
-            and worker.get("citizenship") == "РФ"
-        ):
-            await callback.answer(
-                "❌ Заказ доступен только для иностранцев.", show_alert=True
-            )
-            return
+        # Гражданин РФ может брать любые заказы — без ограничений
+
 
         # дублирование
         already = cur.execute(
