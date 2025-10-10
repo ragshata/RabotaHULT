@@ -85,13 +85,14 @@ def policy_keyboard():
             [InlineKeyboardButton(text="✅ Согласен", callback_data="agree_policy")],
             [
                 InlineKeyboardButton(
-                    text="📖 Правила", url="https://telegra.ph/Proba-09-29-12"
+                    text="📖 Правила",
+                    url="https://telegra.ph/Pravila-servisa--RabotayBro-10-10",
                 )
             ],
             [
                 InlineKeyboardButton(
                     text="🔒 Политика конфиденциальности",
-                    url="https://telegra.ph/Proba-09-29-12",
+                    url="https://telegra.ph/Politika-konfidencialnosti-10-10-37",
                 )
             ],
         ]
@@ -127,10 +128,11 @@ async def cmd_start(message: types.Message, state: FSM):
         one_time_keyboard=True,
     )
     await message.answer(
-        "Привет! Я бот Работаплюс.РФ.\n"
-        "Для регистрации подтвердите ваш номер. Нажмите кнопку ниже 👇",
+        "Ну Здравствуй Брат! RabotayBro — это бот для поиска подработки в Екатеринбурге. "
+        "Подтвердите номер телефона для регистрации нажав кнопку ниже 👇",
         reply_markup=kb,
     )
+
     await state.set_state(Onboarding.get_phone)
 
 
@@ -270,10 +272,24 @@ async def get_country(message: types.Message, state: FSM):
 # === 7. Завершение ===
 @router.callback_query(F.data == "agree_policy")
 async def agree_and_finish(callback: types.CallbackQuery, state: FSM):
-    await callback.message.edit_text("Готово! Хороших заказов вам!")
-    await callback.message.answer(
-        "Здесь вы можете находить новые заказы, подтверждать прибытие и завершение работы, "
-        "а также смотреть баланс и историю:",
-        reply_markup=main_menu(),
+    text = (
+        "Ваш аккаунт успешно активирован. Добро пожаловать в RabotayBro. ✅\n\n"
+        "Мы предлагаем следующие форматы сотрудничества:\n"
+        "- Почасовая оплата (минимум 4 часа): 400 ₽/час\n"
+        "- Смена (8 часов): 3500 ₽\n"
+        "- Полный день (12 часов): 4800 ₽\n\n"
+        "Загляни в «📦 Новые заказы» — если готов работать!"
     )
+
+    await callback.answer()
+
+    # снимаем старую inline-клавиатуру (если была)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    # отправляем НОВОЕ сообщение с ReplyKeyboardMarkup главного меню
+    await callback.message.answer(text, reply_markup=main_menu())
+
     await state.clear()

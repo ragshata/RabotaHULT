@@ -81,13 +81,20 @@ def insert_order(data: dict) -> int:
 
 
 def format_order_card(data: dict, order_id: int) -> str:
+    fmt = data.get("format", "")
+    fmt_display = {
+        "hour": "⏱️ Почасовая",
+        "shift8": "🕗 Смена (8ч)",
+        "day12": "📅 День (12ч)",
+    }.get(fmt, fmt)
+
     return (
         f"📦 Предпросмотр заказа (ID {order_id})\n\n"
         f"👤 Клиент: {data['client_name']} ({data['client_phone']})\n"
         f"📝 Описание: {data['description']}\n"
         f"📍 Адрес: {data['address']} ({data['district']})\n"
         f"⏰ Старт: {dt.datetime.fromtimestamp(data['start_time'], TZ).strftime('%d.%m %H:%M')}\n"
-        f"⚙️ <b>Формат:</b> {format_display(['format'])}\n"
+        f"⚙️ Формат: {fmt_display}\n"
         f"👥 Места: {data['places_total']}\n"
         f"🌍 Гражданство: {data['citizenship']}\n"
         f"ℹ️ Особенности: {data['features']}"
@@ -114,7 +121,11 @@ async def start_create_order(message: types.Message, state):
     await state.set_state(CreateOrder.client_name)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Отменить создание", callback_data="create_order_cancel")]
+            [
+                InlineKeyboardButton(
+                    text="❌ Отменить создание", callback_data="create_order_cancel"
+                )
+            ]
         ]
     )
     await message.answer("👤 Введите имя клиента:", reply_markup=kb)
@@ -327,11 +338,19 @@ async def step_citizenship(callback: types.CallbackQuery, state):
 # === ОСОБЕННОСТИ ===
 @router.callback_query(F.data == "features:none")
 async def features_none(callback: types.CallbackQuery, state):
+    """Если админ выбирает 'Нет' как особенности"""
+    # Проверяем текущее состояние — чтобы не срабатывало случайно
+    current_state = await state.get_state()
+    if current_state != CreateOrder.features.state:
+        await callback.answer()
+        return
+
     await state.update_data(features="нет")
     data = await state.get_data()
 
     preview = format_order_card(data, order_id=0)
     await state.set_state(CreateOrder.confirm)
+
     await callback.message.edit_text(preview, reply_markup=preview_keyboard())
     await callback.answer("Особенности: нет")
 
