@@ -220,7 +220,7 @@ async def step_address_location(message: types.Message, state):
         await message.answer(
             f"📍 Определён адрес: <b>{street}</b>\n"
             f"🏙 Район: <b>{chosen_district}</b>\n\n"
-            f"⏰ Введите дату и время начала (формат: 15.09 09:00):",
+            f"⏰ Введите дату и время начала (формат: 15.09 09:00), нужно писать на 5 часов раньше.",
             parse_mode="HTML",
         )
     else:
@@ -245,7 +245,7 @@ async def step_district(callback: types.CallbackQuery, state):
     await state.set_state(CreateOrder.start_time)
 
     await callback.message.answer(
-        "⏰ Введите дату и время начала (формат: 15.09 09:00):",
+        "⏰ Введите дату и время начала (формат: 15.09 09:00), нужно писать на 5 часов раньше.",
         reply_markup=ReplyKeyboardRemove(),
     )
     await callback.answer()
