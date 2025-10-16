@@ -4,6 +4,7 @@ import datetime
 import urllib.parse
 from aiogram import Router, F, types, Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.exceptions import TelegramBadRequest
 from tgbot.data.config import PATH_DATABASE
 from tgbot.services.tz import TZ
 from tgbot.utils.const_functions import format_display
@@ -204,13 +205,29 @@ async def show_orders(message: types.Message):
 async def paginate_orders(callback: CallbackQuery):
     page = int(callback.data.split(":")[1])
     orders, total = get_orders(callback.from_user.id, page)
+
     if not orders:
         await callback.answer("Нет заказов на этой странице.", show_alert=True)
         return
-    await callback.message.edit_text(
-        "📦 Доступные заказы:\n\nВыберите нужный заказ 👇",
-        reply_markup=orders_keyboard(orders, page, total),
-    )
+
+    text = "📦 Доступные заказы:\n\nВыберите нужный заказ 👇"
+    kb = orders_keyboard(orders, page, total)
+
+    try:
+        # Проверяем, изменилось ли что-то реально
+        if callback.message.text == text and callback.message.reply_markup == kb:
+            await callback.answer("⚠️ Уже эта страница", show_alert=False)
+            return
+
+        await callback.message.edit_text(text, reply_markup=kb)
+
+    except TelegramBadRequest as e:
+        # Обрабатываем только «message is not modified»
+        if "message is not modified" in str(e):
+            await callback.answer("⚠️ Без изменений", show_alert=False)
+        else:
+            # Если другая ошибка — пробрасываем дальше
+            raise
 
 
 @router.callback_query(F.data.startswith("order_card:"))
@@ -325,7 +342,6 @@ async def take_order(callback: CallbackQuery, bot: Bot):
             )
             return
         # Гражданин РФ может брать любые заказы — без ограничений
-
 
         # дублирование
         already = cur.execute(
